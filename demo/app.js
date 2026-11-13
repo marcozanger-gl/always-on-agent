@@ -12,7 +12,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;'
 const buddyImg = () => '<img src="buddy.png" alt="BTW Buddy">';
 
 let walk = null, stops = [], idx = -1, token = 0;
-let speechOn = false, autoTimer = null, hintTimer = null;
+let speechOn = false, hintTimer = null;
 let map, youMarker, routeDone, routeRest, radiusCircle, pinLayer;
 
 /* ---------- stage scaling ---------- */
@@ -74,7 +74,8 @@ function initMap() {
     maxZoom: 16
   }).addTo(map);
   const first = stops[0];
-  map.setView([first.lat, first.lon], ZOOM, { animate: false });
+  // Show the whole walk; the map stays still and the You dot travels across it.
+  map.fitBounds(L.latLngBounds(TRACK), { paddingTopLeft: [60, 130], paddingBottomRight: [60, 90], maxZoom: ZOOM, animate: false });
   routeRest = L.polyline(TRACK, { color: CLAY, weight: 3, opacity: .35, dashArray: '6 8' }).addTo(map);
   routeDone = L.polyline([], { color: CLAY, weight: 4, opacity: .95 }).addTo(map);
   radiusCircle = L.circle([first.lat, first.lon], { radius: walk.radius_m || 500, color: GOLD, weight: 1.5, dashArray: '6 6', fillColor: GOLD, fillOpacity: .03, interactive: false }).addTo(map);
@@ -134,24 +135,14 @@ function dropPins(stop, tk) {
   });
 }
 
-function updateMap(stop, first) {
-  const ti = trackIndex(stop);
-  routeDone.setLatLngs(TRACK.slice(0, ti + 1));
-  radiusCircle.setLatLng([stop.lat, stop.lon]);
-  radiusCircle.setRadius(walk.radius_m || 500);
-  youMarker.setLatLng([stop.lat, stop.lon]);
+function updateMap(stop) {
   pinLayer.clearLayers();
   const tk = ++token;
-  if (first) { map.setView([stop.lat, stop.lon], ZOOM, { animate: false }); setTimeout(() => dropPins(stop, tk), 600); return; }
-  let done = false;
-  const go = () => { if (done || tk !== token) return; done = true; dropPins(stop, tk); };
-  map.once('moveend', () => setTimeout(go, 150));
-  setTimeout(go, 2600);
-  map.flyTo([stop.lat, stop.lon], ZOOM, { duration: 1.8 });
+  setTimeout(() => dropPins(stop, tk), 250);
 }
 
 /* ---------- inset ---------- */
-function renderInset(stop) {
+function renderInset(ll, ti) {
   const W = 210, H = 130, pad = 14;
   const lats = TRACK.map((p) => p[0]), lons = TRACK.map((p) => p[1]);
   const minLa = Math.min(...lats), maxLa = Math.max(...lats), minLo = Math.min(...lons), maxLo = Math.max(...lons);
@@ -160,18 +151,17 @@ function renderInset(stop) {
   const s = Math.min((W - 2 * pad) / w, (H - 2 * pad) / h);
   const ox = (W - w * s) / 2, oy = (H - h * s) / 2;
   const pt = (p) => [(ox + (p[1] - minLo) * k * s).toFixed(1), (oy + (maxLa - p[0]) * s).toFixed(1)];
-  const ti = trackIndex(stop);
   const line = (arr) => arr.map((p) => pt(p).join(',')).join(' ');
-  const cur = pt([stop.lat, stop.lon]);
+  const cur = pt(ll);
   $('#inset').innerHTML =
-    `<polyline points="${line(TRACK.slice(ti))}" fill="none" stroke="#7b8394" stroke-width="2" stroke-dasharray="4 4" stroke-linecap="round"/>` +
-    `<polyline points="${line(TRACK.slice(0, ti + 1))}" fill="none" stroke="${CLAY}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` +
+    `<polyline points="${line([ll].concat(TRACK.slice(ti + 1)))}" fill="none" stroke="#7b8394" stroke-width="2" stroke-dasharray="4 4" stroke-linecap="round"/>` +
+    `<polyline points="${line(TRACK.slice(0, ti + 1).concat([ll]))}" fill="none" stroke="${CLAY}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` +
     `<circle cx="${cur[0]}" cy="${cur[1]}" r="7" fill="#fff" stroke="${CLAY}" stroke-width="3.5"/>`;
 }
 
 /* ---------- phone ---------- */
-function renderClock(stop) {
-  const [t, ap] = (stop.time || '').split(' ');
+function renderClock(time) {
+  const [t, ap] = (time || '').split(' ');
   $('#clock-time').textContent = t || '';
   $('#clock-ampm').textContent = ap || '';
 }
@@ -222,31 +212,74 @@ function updateConnector() {
   const dx = Math.max(40, (x2 - x1) * 0.5);
   path.setAttribute('d', `M${x1.toFixed(1)} ${y1.toFixed(1)} C${(x1 + dx).toFixed(1)} ${y1.toFixed(1)} ${(x2 - dx).toFixed(1)} ${y2.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`);
 }
-function trackConnector(ms) {
-  const end = performance.now() + ms;
-  const f = () => { updateConnector(); if (performance.now() < end) requestAnimationFrame(f); };
-  f();
-}
-
 /* ---------- show stop ---------- */
 function showStop(i, opts = {}) {
   if (i < 0 || i >= stops.length) return;
   const first = idx < 0;
   idx = i;
   const stop = stops[i];
-  renderClock(stop);
   renderStack(i);
-  const ti = trackIndex(stop);
-  $('#coords').textContent = `${stop.lat.toFixed(4)}, ${stop.lon.toFixed(4)}`;
   $('#trigmeta').textContent = `${stop.time} · stop ${stop.seq + 1} of ${TRACK.length} · ${(stop.places || []).length} places within ${walk.radius_m || 500} m`;
-  renderInset(stop);
-  updateMap(stop, first);
-  trackConnector(2600);
+  updateMap(stop);
   if (speechOn && !opts.silent) speakStop(stop);
 }
-const next = () => { if (idx < stops.length - 1) showStop(idx + 1); else stopAuto(); };
-const prev = () => showStop(idx - 1);
-const restart = () => { speechSynthesis.cancel(); showStop(0); };
+/* ---------- continuous walk ----------
+   The You dot never stops. Each leg between two stops takes the same time (LEG_S), so a
+   notification lands on a steady beat; reaching a stop shows its notification and pins while the
+   dot keeps walking. After the last stop it walks back to the first one and the loop restarts.
+   Whole walk = ?minutes= (default 4, for a ~5 minute demo) -> one notification every ~22 s.
+   `x` is the position as a fractional stop index: 0 .. LEGS, then LEGS .. LEGS+1 is the walk back. */
+const LEGS = TRACK.length - 1;
+const WALK_MINUTES = +(new URLSearchParams(location.search).get('minutes')) || 4;
+const LEG_S = (WALK_MINUTES * 60) / LEGS;
+const RETURN_S = LEG_S * 1.5;
+let walking = true, x = 0, lastT = null, frame = 0;
+
+function pointAt(x) {
+  const k = Math.min(Math.floor(x), LEGS), f = x - k;
+  const a = TRACK[k], b = k < LEGS ? TRACK[k + 1] : TRACK[0];
+  return { k, f, ll: [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f] };
+}
+const timeAt = (x) => { // stop 0 is 1:00 PM, +25 min per stop
+  const m = Math.round(13 * 60 + x * 25), h = Math.floor(m / 60) % 24;
+  return `${h % 12 || 12}:${String(m % 60).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+};
+function arrive(k) {
+  const i = stops.findIndex((s) => s.seq === k);
+  if (i >= 0) showStop(i);
+}
+function jumpTo(k) {
+  k = ((k % TRACK.length) + TRACK.length) % TRACK.length;
+  x = k;
+  arrive(k);
+}
+function placeYou() {
+  const p = pointAt(x);
+  youMarker.setLatLng(p.ll);
+  radiusCircle.setLatLng(p.ll);
+  routeDone.setLatLngs(TRACK.slice(0, p.k + 1).concat([p.ll]));
+  renderClock(timeAt(x));
+  $('#coords').textContent = `${p.ll[0].toFixed(4)}, ${p.ll[1].toFixed(4)}`;
+  if (frame++ % 6 === 0) renderInset(p.ll, p.k);
+  updateConnector();
+}
+function walkFrame(t) {
+  const dt = lastT == null ? 0 : Math.min(0.1, (t - lastT) / 1000);
+  lastT = t;
+  if (walking) {
+    const before = x;
+    x += dt / (Math.floor(x) < LEGS ? LEG_S : RETURN_S);
+    if (Math.floor(x) > Math.floor(before)) {
+      if (x >= LEGS + 1) { x = 0; arrive(0); } else arrive(Math.floor(x));
+    }
+  }
+  placeYou();
+  requestAnimationFrame(walkFrame);
+}
+const curK = () => Math.min(Math.floor(x), LEGS);
+const next = () => jumpTo(curK() + 1);
+const prev = () => jumpTo(x - curK() > 0.1 ? curK() : curK() - 1);
+const restart = () => { speechSynthesis.cancel(); jumpTo(0); };
 
 /* ---------- speech ---------- */
 function speakStop(stop) {
@@ -260,13 +293,11 @@ function speakStop(stop) {
   speechSynthesis.speak(u);
 }
 
-/* ---------- autoplay & hint ---------- */
-function startAuto() { stopAuto(); autoTimer = setInterval(next, 8000); status(); }
-function stopAuto() { if (autoTimer) clearInterval(autoTimer); autoTimer = null; status(); }
-function toggleAuto() { autoTimer ? stopAuto() : startAuto(); }
+/* ---------- controls & hint ---------- */
+function toggleWalk() { walking = !walking; status(); }
 function status() {
   const el = $('#hint'); if (!el) return;
-  el.innerHTML = `<kbd>&rarr;</kbd>/<kbd>Space</kbd> next &nbsp; <kbd>&larr;</kbd> back &nbsp; <kbd>A</kbd> autoplay ${autoTimer ? 'ON' : 'off'} &nbsp; <kbd>S</kbd> speech ${speechOn ? 'ON' : 'off'} &nbsp; <kbd>R</kbd> restart`;
+  el.innerHTML = `<kbd>Space</kbd> walking ${walking ? 'ON' : 'paused'} &nbsp; <kbd>&rarr;</kbd> next stop &nbsp; <kbd>&larr;</kbd> back &nbsp; <kbd>S</kbd> speech ${speechOn ? 'ON' : 'off'} &nbsp; <kbd>R</kbd> restart`;
   el.classList.remove('gone');
   clearTimeout(hintTimer);
   hintTimer = setTimeout(() => el.classList.add('gone'), 4000);
@@ -274,9 +305,9 @@ function status() {
 addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toLowerCase();
-  if (k === 'arrowright' || k === ' ') { e.preventDefault(); next(); }
+  if (k === 'arrowright') { e.preventDefault(); next(); }
   else if (k === 'arrowleft') { e.preventDefault(); prev(); }
-  else if (k === 'a') toggleAuto();
+  else if (k === ' ' || k === 'a') { e.preventDefault(); toggleWalk(); }
   else if (k === 's') { speechOn = !speechOn; if (!speechOn) speechSynthesis.cancel(); status(); }
   else if (k === 'r') restart();
 });
@@ -332,11 +363,20 @@ function applyLive(K, parsed) {
     const w = (base.places || []).find((x) => x.title === p.title);
     return Object.assign({}, p, w && w.lat != null ? { lat: w.lat, lon: w.lon } : {});
   });
-  const body = (places[0] && places[0].snippet || base.notification && base.notification.body || '').slice(0, 140);
+  const body = shortBody(places[0] && places[0].snippet || base.notification && base.notification.body || '');
   const stop = Object.assign({}, base, { label, places: places.length ? places : base.places,
     notification: { title: `By the way, you're at ${label}`, body } });
-  if (i < 0) { stops.push(stop); stops.sort((a, b) => a.seq - b.seq); i = stops.indexOf(stop); } else stops[i] = stop;
-  showStop(i);
+  if (i < 0) { stops.push(stop); stops.sort((a, b) => a.seq - b.seq); } else stops[i] = stop;
+  jumpTo(K);
+}
+
+// Notification body for live comments: whole sentences that fit in 140 chars, else cut at a word + "…".
+function shortBody(t, max = 140) {
+  if (t.length <= max) return t;
+  let out = '';
+  for (const sent of t.match(/[^.!?]+[.!?]+\s*/g) || []) { if ((out + sent).trim().length > max) break; out += sent; }
+  if (out.trim()) return out.trim();
+  return t.slice(0, max - 1).replace(/\s+\S*$/, '') + '…';
 }
 
 /* ---------- boot ---------- */
@@ -347,8 +387,8 @@ function applyLive(K, parsed) {
   initMap();
   fit();
   const q = new URLSearchParams(location.search);
-  const start = Math.max(0, stops.findIndex(s => String(s.seq) === q.get('stop')));
-  showStop(start);
+  jumpTo(+q.get('stop') || 0);
+  requestAnimationFrame(walkFrame);
   status();
   if (speechSynthesis) speechSynthesis.getVoices();
   if (q.get('repo') && q.get('issue')) startLive(q.get('repo'), q.get('issue'));

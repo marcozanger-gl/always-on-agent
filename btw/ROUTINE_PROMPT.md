@@ -14,13 +14,18 @@ You run unattended. Do the steps below in order, post exactly one comment, and s
 
 ## Steps
 
+GitHub access: use the **REST API only**, through `gh api` (GraphQL is not available in cloud sessions,
+so `gh issue list/view/comment` fail there). If `gh` is unavailable, use the equivalent GitHub MCP tools.
+`{repo}` below is `owner/name` of this repository (from `git remote get-url origin`).
+
 1. **Find the feed issue.** Look for an open issue in this repo with the label `feed_label`:
-   `gh issue list --label btw-feed --state open --json number,title --limit 1`
-   If there isn't one, create the label if it's missing (`gh label create btw-feed --color 0E8A16 --force`),
-   then create the issue with title `feed_title` and a one-line body that explains what it is.
+   `gh api "repos/{repo}/issues?labels=btw-feed&state=open&per_page=1" --jq '.[0].number'`
+   If there isn't one, create the label if it's missing
+   (`gh api repos/{repo}/labels -f name=btw-feed -f color=0E8A16`, ignore "already exists"),
+   then create the issue: `gh api repos/{repo}/issues -f title="<feed_title>" -f body="<one line explaining it>" -f "labels[]=btw-feed"`.
 
 2. **Work out the current stop.** Read every comment on the feed issue:
-   `gh issue view <n> --comments --json comments`
+   `gh api --paginate "repos/{repo}/issues/<n>/comments?per_page=100" --jq '.[].body'`
    Count the comments that contain the marker `<!-- btw-stop:`. With `count` stop comments
    and `L = len(points)`, the current stop is `N = count % L`, and the position is `points[N]`.
    Never use any other state.
@@ -43,7 +48,7 @@ You run unattended. Do the steps below in order, post exactly one comment, and s
    close and have a good story: landmarks, history, art, odd facts. Skip plain office buildings
    or streets unless their extract is genuinely interesting.
 
-6. **Post one comment** on the feed issue with `gh issue comment <n> --body-file <tmpfile>`, in exactly this shape:
+6. **Post one comment** on the feed issue with `gh api repos/{repo}/issues/<n>/comments -F body=@<tmpfile>`, in exactly this shape:
 
    ```markdown
    ### 📍 Stop {N+1}/{L}: {label}
