@@ -332,11 +332,20 @@ function applyLive(K, parsed) {
     const w = (base.places || []).find((x) => x.title === p.title);
     return Object.assign({}, p, w && w.lat != null ? { lat: w.lat, lon: w.lon } : {});
   });
-  const body = (places[0] && places[0].snippet || base.notification && base.notification.body || '').slice(0, 140);
+  const body = shortBody(places[0] && places[0].snippet || base.notification && base.notification.body || '');
   const stop = Object.assign({}, base, { label, places: places.length ? places : base.places,
     notification: { title: `By the way, you're at ${label}`, body } });
   if (i < 0) { stops.push(stop); stops.sort((a, b) => a.seq - b.seq); i = stops.indexOf(stop); } else stops[i] = stop;
   showStop(i);
+}
+
+// Notification body for live comments: whole sentences that fit in 140 chars, else cut at a word + "…".
+function shortBody(t, max = 140) {
+  if (t.length <= max) return t;
+  let out = '';
+  for (const sent of t.match(/[^.!?]+[.!?]+\s*/g) || []) { if ((out + sent).trim().length > max) break; out += sent; }
+  if (out.trim()) return out.trim();
+  return t.slice(0, max - 1).replace(/\s+\S*$/, '') + '…';
 }
 
 /* ---------- boot ---------- */
