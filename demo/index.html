@@ -45,6 +45,19 @@
 
   <div id="badges"></div>
   <div id="hint"></div>
+
+  <!-- INTRO: BTW buddy + Start, then the presentation video, then the app -->
+  <div id="intro">
+    <div class="intro-card">
+      <img class="intro-buddy" src="buddy.png" alt="BTW Buddy">
+      <div class="intro-logo">by the way<span>.</span></div>
+      <p class="intro-tag">Hi, I'm BTW Buddy. Go for a walk and I'll tell you what's around you.</p>
+      <button id="intro-start" type="button">&#9654;&ensp;Start</button>
+      <a id="intro-skip-app" href="#">skip intro</a>
+    </div>
+    <video id="intro-video" src="start.mp4" playsinline preload="auto"></video>
+    <button id="intro-skip" type="button">Skip &rsaquo;</button>
+  </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="app.js"></script>

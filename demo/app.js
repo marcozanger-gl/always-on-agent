@@ -302,8 +302,46 @@ function status() {
   clearTimeout(hintTimer);
   hintTimer = setTimeout(() => el.classList.add('gone'), 4000);
 }
+/* ---------- intro: BTW buddy + Start → presentation video → the app ----------
+   ?intro=0 skips it. The walk waits paused behind the intro and starts from the
+   first stop when the app appears, so the first notification drops in on cue. */
+let introOn = false, startStop = 0;
+function setupIntro(skip) {
+  const el = $('#intro'), vid = $('#intro-video');
+  if (skip) { el.remove(); return; }
+  introOn = true;
+  walking = false;
+  const showApp = () => {
+    if (!introOn) return;
+    introOn = false;
+    vid.pause();
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 800);
+    walking = true;
+    jumpTo(startStop);
+    status();
+  };
+  const play = () => {
+    if (el.classList.contains('playing')) return;
+    el.classList.add('playing');
+    vid.currentTime = 0;
+    vid.play().catch(showApp); // no video / can't play → go straight to the app
+  };
+  vid.addEventListener('ended', showApp);
+  vid.addEventListener('error', showApp);
+  $('#intro-start').addEventListener('click', play);
+  $('#intro-skip').addEventListener('click', showApp);
+  $('#intro-skip-app').addEventListener('click', (e) => { e.preventDefault(); showApp(); });
+  addEventListener('keydown', (e) => {
+    if (!introOn) return;
+    e.stopImmediatePropagation();
+    if (e.key === 'Escape') showApp();
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.classList.contains('playing') ? showApp() : play(); }
+  }, true);
+}
+
 addEventListener('keydown', (e) => {
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || introOn) return;
   const k = e.key.toLowerCase();
   if (k === 'arrowright') { e.preventDefault(); next(); }
   else if (k === 'arrowleft') { e.preventDefault(); prev(); }
@@ -387,9 +425,11 @@ function shortBody(t, max = 140) {
   initMap();
   fit();
   const q = new URLSearchParams(location.search);
-  jumpTo(+q.get('stop') || 0);
+  startStop = +q.get('stop') || 0;
+  setupIntro(q.get('intro') === '0');
+  jumpTo(startStop);
   requestAnimationFrame(walkFrame);
-  status();
+  if (!introOn) status();
   if (speechSynthesis) speechSynthesis.getVoices();
   if (q.get('repo') && q.get('issue')) startLive(q.get('repo'), q.get('issue'));
 })();
